@@ -89,7 +89,7 @@ if brand_only:
     filtered_df = filtered_df[filtered_df['IDS_RATE_CODE'].isin(BRAND_CODES)]
 
 # ------------------------------
-# KPI Cards
+# KPI Cards (Overall)
 # ------------------------------
 st.header("📊 Key Performance Indicators")
 
@@ -126,7 +126,7 @@ else:
             st.metric(f"**{year}**", f"${rev:,.0f}", f"{nights:,.0f} nights | ADR ${adr:.2f}")
 
 # ------------------------------
-# Chart 1: Top 10 Revenue by Year (Bar Chart)
+# Chart 1: Top 10 Revenue by Year
 # ------------------------------
 st.header("🏆 Top 10 Rate Codes by Revenue")
 if not filtered_df.empty:
@@ -152,56 +152,70 @@ else:
     st.warning("No data available for the selected filters.")
 
 # ------------------------------
-# Chart 2: ADR Trend Lines
+# Chart 2: ADR Evolution – Top Volume Codes
 # ------------------------------
 st.header("📈 ADR Evolution – Top Volume Codes")
 if not filtered_df.empty:
     top_volume = filtered_df.groupby('IDS_RATE_CODE')['Room Nights'].sum().nlargest(5).index.tolist()
-    trend_df = filtered_df[filtered_df['IDS_RATE_CODE'].isin(top_volume)]
+    trend_df = filtered_df[filtered_df['IDS_RATE_CODE'].isin(top_volume)].copy()
+    trend_df['Calc_ADR'] = trend_df['Room Revenue'] / trend_df['Room Nights']
     fig2 = px.line(
         trend_df,
         x='Year',
-        y='Daily AVG',
+        y='Calc_ADR',
         color='IDS_RATE_CODE',
         markers=True,
-        title='ADR Trends for Top 5 Volume Codes',
-        labels={'Daily AVG': 'ADR ($)', 'Year': 'Year'}
+        title='ADR Trends for Top 5 Volume Codes (Calculated from Revenue/Nights)',
+        labels={'Calc_ADR': 'ADR ($)', 'Year': 'Year'}
     )
     st.plotly_chart(fig2, use_container_width=True)
 else:
     st.warning("No data available for ADR trends.")
 
 # ------------------------------
-# Chart 3: Revenue Share by Segment (Pie)
+# Chart 3: Revenue Share by Segment – BAR/RACK, Choice, OTA, Others
 # ------------------------------
-st.header("🥧 Revenue Share by Segment")
+st.header("📊 Revenue Share by Segment – BAR/RACK, Choice, OTA, Others")
 
-def map_segment(code):
+def map_segment_detailed(code):
     code = str(code).upper()
-    if code in ['SBOOK', 'LEXP']:
-        return 'OTA'
     if code == 'RACK':
-        return 'Rack'
-    if code.startswith(('SCPM', 'SRTL', 'SCR', 'SCC')):
-        return 'Corporate'
-    if code.startswith(('LPROMO', 'LOPQ', 'SAPR', 'SOPM', 'SP')):
-        return 'Promo/Package'
-    if code == 'GROUP~':
-        return 'Group'
-    return 'Other'
+        return 'BAR/RACK'
+    elif code in BRAND_CODES:
+        return 'Choice'
+    elif code in ['SBOOK', 'LEXP']:
+        return 'OTA'
+    else:
+        return 'Others'
 
 if not filtered_df.empty:
-    filtered_df['Segment'] = filtered_df['IDS_RATE_CODE'].apply(map_segment)
-    seg_data = filtered_df.groupby(['Year', 'Segment'])['Room Revenue'].sum().reset_index()
-    fig3 = px.pie(
-        seg_data,
-        values='Room Revenue',
-        names='Segment',
-        facet_col='Year',
-        title='Revenue Share by Segment',
-        hole=0.3
+    filtered_df['Segment_Detailed'] = filtered_df['IDS_RATE_CODE'].apply(map_segment_detailed)
+    seg_rev = filtered_df.groupby(['Year', 'Segment_Detailed'])['Room Revenue'].sum().reset_index()
+    seg_rev['% Share'] = seg_rev.groupby('Year')['Room Revenue'].transform(lambda x: 100 * x / x.sum())
+    
+    fig3 = px.bar(
+        seg_rev,
+        x='Year',
+        y='Room Revenue',
+        color='Segment_Detailed',
+        text=seg_rev['% Share'].apply(lambda x: f'{x:.1f}%'),
+        title='Revenue Distribution by Segment',
+        labels={'Room Revenue': 'Revenue ($)', 'Year': 'Year', 'Segment_Detailed': 'Segment'},
+        barmode='group',
+        color_discrete_map={
+            'BAR/RACK': '#1f77b4',
+            'Choice': '#2ca02c',
+            'OTA': '#ff7f0e',
+            'Others': '#9467bd'
+        }
     )
+    fig3.update_traces(textposition='outside')
+    fig3.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
     st.plotly_chart(fig3, use_container_width=True)
+    
+    with st.expander("📋 View Segment Data Table"):
+        pivot = seg_rev.pivot(index='Segment_Detailed', columns='Year', values='Room Revenue').fillna(0)
+        st.dataframe(pivot.style.format("${:,.0f}"))
 else:
     st.warning("No data available for segment analysis.")
 
@@ -218,7 +232,6 @@ if not filtered_df.empty:
         fill_value=0
     )
     presence = (presence > 0).astype(int)
-    # Sort by total revenue
     total_rev = filtered_df.groupby('IDS_RATE_CODE')['Room Revenue'].sum().sort_values(ascending=False)
     presence = presence.loc[total_rev.head(30).index]
     fig4 = px.imshow(
@@ -268,6 +281,98 @@ if not filtered_df.empty:
     st.plotly_chart(fig5, use_container_width=True)
 else:
     st.warning("No data for Pareto chart.")
+
+# ------------------------------
+# NEW: Reservation Activity Section
+# ------------------------------
+st.header("📅 Reservation Activity Insights")
+st.markdown("*Note: Length of Stay and Lead Time require reservation‑level data not present in the current files. Below are placeholder calculations and recommendations.*")
+
+# Placeholder KPI columns for Avg LOS and Lead Time
+col_a, col_b, col_c = st.columns(3)
+
+with col_a:
+    st.metric(
+        label="📆 Avg Length of Stay (est.)",
+        value="N/A",
+        help="Requires # of reservations and total nights. Add columns 'Reservations' or 'Check-in/out dates' to data."
+    )
+with col_b:
+    st.metric(
+        label="⏳ Avg Lead Time (est.)",
+        value="N/A",
+        help="Requires booking date and arrival date. Add these fields for accurate calculation."
+    )
+with col_c:
+    # Overall occupancy or RevPAR placeholder
+    total_nights = filtered_df['Room Nights'].sum()
+    total_rev = filtered_df['Room Revenue'].sum()
+    revpar = total_rev / 365 if total_nights > 0 else 0  # crude estimate
+    st.metric(label="📊 Est. RevPAR", value=f"${revpar:.2f}", help="Based on total revenue / 365 days; use actual room count for accuracy.")
+
+# Top Rate Code Performers by Channel (Direct/Choice, OTA, Others)
+st.subheader("🏅 Top Rate Code Performers by Channel")
+
+if not filtered_df.empty:
+    # Define channel mapping
+    def get_channel(code):
+        code = str(code).upper()
+        if code in BRAND_CODES:
+            return 'Direct (Choice)'
+        elif code in ['SBOOK', 'LEXP']:
+            return 'OTA'
+        else:
+            return 'Others'
+    
+    filtered_df['Channel'] = filtered_df['IDS_RATE_CODE'].apply(get_channel)
+    
+    # For each year, find top revenue code per channel
+    top_performers = []
+    for year in selected_years:
+        year_data = filtered_df[filtered_df['Year'] == year]
+        for channel in ['Direct (Choice)', 'OTA', 'Others']:
+            channel_data = year_data[year_data['Channel'] == channel]
+            if not channel_data.empty:
+                top_code = channel_data.loc[channel_data['Room Revenue'].idxmax()]
+                top_performers.append({
+                    'Year': year,
+                    'Channel': channel,
+                    'Rate Code': top_code['IDS_RATE_CODE'],
+                    'Revenue': top_code['Room Revenue'],
+                    'Nights': top_code['Room Nights'],
+                    'ADR': top_code['Daily AVG']
+                })
+    
+    if top_performers:
+        perf_df = pd.DataFrame(top_performers)
+        
+        # Display as a table with formatted values
+        st.dataframe(
+            perf_df.style.format({
+                'Revenue': '${:,.0f}',
+                'Nights': '{:,.0f}',
+                'ADR': '${:.2f}'
+            }),
+            use_container_width=True
+        )
+        
+        # Optional: Bar chart of top performer revenue by channel
+        fig_perf = px.bar(
+            perf_df,
+            x='Year',
+            y='Revenue',
+            color='Channel',
+            text='Rate Code',
+            title='Top Revenue Code by Channel and Year',
+            labels={'Revenue': 'Revenue ($)'},
+            barmode='group'
+        )
+        fig_perf.update_traces(textposition='outside')
+        st.plotly_chart(fig_perf, use_container_width=True)
+    else:
+        st.info("No data available for top performers.")
+else:
+    st.warning("No data to display top performers.")
 
 # ------------------------------
 # Raw Data Explorer & Download
