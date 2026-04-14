@@ -111,23 +111,30 @@ st.plotly_chart(fig, use_container_width=True)
 # --- PICKUP (PACE) ---
 st.subheader("📅 Booking Pace (Pickup)")
 
-pickup = df_all[df_all['Year'].isin([2024, selected_year])]
-pickup = pickup.groupby(['Year', df_all['IDS_DATE'].dt.day])['RoomRev'].sum().cumsum().reset_index()
+pickup = df_all[df_all['Year'].isin([2024, selected_year])].copy()
 
-fig2 = px.line(pickup, x='IDS_DATE', y='RoomRev', color='Year')
+# Create Day column PROPERLY on the same dataframe
+pickup['Day'] = pickup['IDS_DATE'].dt.day
+
+# Aggregate daily revenue
+pickup = pickup.groupby(['Year', 'Day'], as_index=False)['RoomRev'].sum()
+
+# Sort before cumulative sum
+pickup = pickup.sort_values(['Year', 'Day'])
+
+# Calculate cumulative revenue (pace)
+pickup['CumulativeRev'] = pickup.groupby('Year')['RoomRev'].cumsum()
+
+# Plot
+fig2 = px.line(
+    pickup,
+    x='Day',
+    y='CumulativeRev',
+    color='Year',
+    title="Cumulative Revenue Pace"
+)
+
 st.plotly_chart(fig2, use_container_width=True)
-
-# --- DAY OF WEEK ---
-st.subheader("📊 Day-of-Week Performance")
-
-dow = df_all[df_all['Year'] == selected_year].groupby('DOW').agg({
-    'RoomRev': 'sum',
-    'OccPercent': 'mean',
-    'RoomsSold': 'sum'
-}).reindex(['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'])
-
-fig3 = px.bar(dow, y='RoomRev')
-st.plotly_chart(fig3, use_container_width=True)
 
 # --- STRATEGY ENGINE ---
 st.subheader("🎯 Revenue Strategy Engine")
