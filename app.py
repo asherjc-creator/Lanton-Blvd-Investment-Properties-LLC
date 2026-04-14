@@ -10,115 +10,143 @@ st.set_page_config(page_title="Revenue Management - Arlington 22213", layout="wi
 # --- DATA PROCESSING ---
 @st.cache_data
 def load_and_clean():
-    # Loading uploaded files
-    df24 = pd.read_csv('ECONO - 2024.csv')
-    df26 = pd.read_csv('ECONO - 2026.csv')
+    files = {
+        2024: 'ECONO - 2024.csv',
+        2025: 'ECONO - 2025.csv',
+        2026: 'ECONO - 2026.csv'
+    }
     
-    def process(df, year):
-        df['IDS_DATE'] = pd.to_datetime(df['IDS_DATE'], format='%m/%d/%Y')
-        # Clean currency/percentage strings
-        for col in ['RoomRev', 'OccPercent']:
-            df[col] = df[col].astype(str).str.replace(',', '').str.replace('%', '').astype(float)
+    all_data = []
+    for year, file_path in files.items():
+        df = pd.read_csv(file_path)
+        # Standardize date format
+        df['IDS_DATE'] = pd.to_datetime(df['IDS_DATE'], format='%m/%d/%Y', errors='coerce')
+        
+        # Clean numeric columns (handle strings with commas or % signs)
+        for col in ['RoomRev', 'OccPercent', 'ADR', 'RevPAR']:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.replace(',', '').str.replace('%', '').str.replace('$', '').strip()
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         df['Year'] = year
-        return df
+        df['Month'] = df['IDS_DATE'].dt.month
+        all_data.append(df)
+        
+    return pd.concat(all_data)
 
-    return process(df24, 2024), process(df26, 2026)
-
-df24, df26 = load_and_clean()
+df_all = load_and_clean()
 
 # --- SIDEBAR ---
 st.sidebar.image("https://www.choicehotels.com/hotel-logos/brand-logos/econo-lodge.svg", width=120)
 st.sidebar.title("📅 RM Controls")
-month_names = list(calendar.month_name)[4:13] # April to December
-selected_month_name = st.sidebar.selectbox("Select Month", month_names)
-selected_month = list(calendar.month_name).index(selected_month_name)
 
-# --- CALCULATIONS ---
-# 2024 Targets for the selected month
-target_month = df24[df24['IDS_DATE'].dt.month == selected_month]
-target_adr = target_month['ADR'].mean()
-target_occ = target_month['OccPercent'].mean()
-target_revpar = target_month['RevPAR'].mean()
+# Selection for month
+month_names = list(calendar.month_name)[1:] # All months
+selected_month_name = st.sidebar.selectbox("Select Month for Comparison", month_names, index=3) # Default April
+selected_month_idx = list(calendar.month_name).index(selected_month_name)
 
-# 2026 Performance (Actual or Pacing)
-current_month = df26[df26['IDS_DATE'].dt.month == selected_month]
-curr_adr = current_month['ADR'].mean() if not current_month.empty else 0
-curr_occ = current_month['OccPercent'].mean() if not current_month.empty else 0
+# Filter Data for the selected month across all years
+monthly_df = df_all[df_all['Month'] == selected_month_idx]
+
+# --- KPI CALCULATIONS ---
+# Target 2024 metrics
+target_2024 = monthly_df[monthly_df['Year'] == 2024]
+t_rev = target_2024['RoomRev'].sum()
+t_adr = target_2024['ADR'].mean()
+t_occ = target_2024['OccPercent'].mean()
+
+# Current 2026 metrics
+current_2026 = monthly_df[monthly_df['Year'] == 2026]
+c_rev = current_2026['RoomRev'].sum()
+c_adr = current_2026['ADR'].mean()
+c_occ = current_2026['OccPercent'].mean()
 
 # --- DASHBOARD HEADER ---
-st.title(f"Revenue Dashboard: {selected_month_name} 2026")
-st.markdown(f"**Market:** Arlington, VA 22213 | **Baseline:** 2024 KPIs")
+st.title(f"Revenue Comparison Dashboard: {selected_month_name}")
+st.markdown(f"**Arlington, VA 22213** | Comparative Analysis 2024 vs 2025 vs 2026")
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Target ADR", f"${target_adr:.2f}")
-col2.metric("Target Occupancy", f"{target_occ:.1f}%")
-col3.metric("Target RevPAR", f"${target_revpar:.2f}")
 
-# Recommendation Logic
+def delta_text(curr, target, is_percent=False):
+    if target == 0 or pd.isna(target) or pd.isna(curr): return None
+    diff = curr - target
+    return f"{diff:+.1f}%" if is_percent else f"${diff:+.2f}"
+
+col1.metric("2026 Total Revenue", f"${c_rev:,.0f}", delta_text(c_rev, t_rev) if c_rev > 0 else None)
+col2.metric("2026 Avg ADR", f"${c_adr:.2f}", delta_text(c_adr, t_adr) if c_adr > 0 else None)
+col3.metric("2026 Avg Occupancy", f"{c_occ:.1f}%", delta_text(c_occ, t_occ, True) if c_occ > 0 else None)
+
 with col4:
-    st.subheader("💡 Pricing Advice")
-    if curr_adr == 0:
-        st.info(f"Set baseline rate at **${target_adr:.2f}**")
-    elif curr_adr < target_adr:
-        st.warning("Rate is below 2024 Target. **Increase Pricing.**")
-    else:
-        st.success("Target ADR achieved. Hold or Push.")
+    st.info(f"**2024 Target (Baseline)**\n\nRev: ${t_rev:,.0f} | ADR: ${t_adr:.2f}")
 
 st.divider()
 
+# --- KPI CHARTS (BAR CHARTS) ---
+st.subheader(f"YoY Performance Metrics - {selected_month_name}")
+
+# Prepare aggregation for charts
+chart_data = monthly_df.groupby('Year').agg({
+    'RoomRev': 'sum',
+    'ADR': 'mean',
+    'OccPercent': 'mean'
+}).reset_index()
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
+    fig_rev = px.bar(chart_data, x='Year', y='RoomRev', 
+                     title="Total Room Revenue",
+                     color='Year', color_discrete_sequence=px.colors.qualitative.Pastel)
+    fig_rev.update_layout(showlegend=False)
+    st.plotly_chart(fig_rev, use_container_width=True)
+
+with c2:
+    fig_adr = px.bar(chart_data, x='Year', y='ADR', 
+                     title="Average Daily Rate (ADR)",
+                     color='Year', color_discrete_sequence=px.colors.qualitative.Safe)
+    fig_adr.update_layout(showlegend=False)
+    st.plotly_chart(fig_adr, use_container_width=True)
+
+with c3:
+    fig_occ = px.bar(chart_data, x='Year', y='OccPercent', 
+                     title="Average Occupancy %",
+                     color='Year', color_discrete_sequence=px.colors.qualitative.Prism)
+    fig_occ.update_layout(showlegend=False, yaxis_range=[0,100])
+    st.plotly_chart(fig_occ, use_container_width=True)
+
 # --- CALENDAR VIEW ---
-st.subheader(f"Daily Yield Calendar: {selected_month_name}")
+st.divider()
+st.subheader(f"2026 Daily Yield Calendar: {selected_month_name}")
 
-# Create Calendar Grid
-cal = calendar.monthcalendar(2026, selected_month)
-cols = st.columns(7)
+cal = calendar.monthcalendar(2026, selected_month_idx)
 weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-# Header Row
+cols = st.columns(7)
 for i, day in enumerate(weekdays):
-    cols[i].markdown(f"**{day}**")
+    cols[i].markdown(f"<center><b>{day}</b></center>", unsafe_allow_html=True)
 
-# Calendar Rows
 for week in cal:
     cols = st.columns(7)
     for i, day in enumerate(week):
         if day == 0:
             cols[i].write("")
         else:
-            # Fetch daily data for 2026 if available
-            day_data = current_month[current_month['IDS_DATE'].dt.day == day]
-            
+            day_data = current_2026[current_2026['IDS_DATE'].dt.day == day]
             if not day_data.empty:
                 adr = day_data['ADR'].values[0]
                 occ = day_data['OccPercent'].values[0]
-                revp = day_data['RevPAR'].values[0]
+                # Dynamic color: Blue for high occupancy, Orange for low
+                color = "#99ccff" if occ > 80 else "#ffebcc" if occ < 50 else "#cce5ff"
                 
-                # Logic for background color based on occupancy
-                bg_color = "#e6f3ff" if occ < 50 else "#cce5ff" if occ < 80 else "#99ccff"
-                
-                # CORRECTED LINE BELOW: Removed unsafe_allow_index
                 cols[i].markdown(
-                    f"""<div style="border:1px solid #ddd; padding:5px; border-radius:5px; background-color:{bg_color}; min-height:100px;">
-                    <span style="font-weight:bold; font-size:1.2em;">{day}</span><br>
+                    f"""<div style="border:1px solid #ddd; padding:8px; border-radius:5px; background-color:{color}; text-align:center;">
+                    <span style="font-size:1.1em; font-weight:bold;">{day}</span><br>
                     <small>ADR: <b>${adr:.0f}</b></small><br>
-                    <small>RPAR: <b>${revp:.0f}</b></small><br>
                     <small>OCC: <b>{occ:.0f}%</b></small>
                     </div>""", unsafe_allow_html=True
                 )
             else:
-                # Placeholder for future dates (Targets)
                 cols[i].markdown(
-                    f"""<div style="border:1px solid #eee; padding:5px; border-radius:5px; color:#999; min-height:100px;">
-                    <span style="font-weight:bold;">{day}</span><br>
-                    <small>Tgt ADR: ${target_adr:.0f}</small><br>
-                    <small>Tgt Occ: {target_occ:.0f}%</small>
+                    f"""<div style="border:1px solid #eee; padding:8px; border-radius:5px; color:#aaa; text-align:center;">
+                    {day}<br><small>No Data</small>
                     </div>""", unsafe_allow_html=True
                 )
-
-# --- ANALYTICS CHART ---
-st.divider()
-st.subheader("Performance Yield Map")
-fig = px.scatter(target_month, x="OccPercent", y="ADR", size="RoomRev", color="RevPAR",
-                 title=f"Optimal Yield Curve (Based on {selected_month_name} 2024 Actuals)",
-                 labels={"OccPercent": "Occupancy %", "ADR": "Daily Rate ($)"})
-st.plotly_chart(fig, use_container_width=True)
