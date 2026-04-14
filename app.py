@@ -85,7 +85,7 @@ for week in cal:
         if day == 0:
             cols[i].write("")
         else:
-            # Fetch daily data for 2026 if available, else show target
+            # Fetch daily data for 2026 if available
             day_data = current_month[current_month['IDS_DATE'].dt.day == day]
             
             if not day_data.empty:
@@ -93,19 +93,20 @@ for week in cal:
                 occ = day_data['OccPercent'].values[0]
                 revp = day_data['RevPAR'].values[0]
                 
-                # Visual styling based on occupancy
+                # Logic for background color based on occupancy
                 bg_color = "#e6f3ff" if occ < 50 else "#cce5ff" if occ < 80 else "#99ccff"
                 
+                # CORRECTED LINE BELOW: Removed unsafe_allow_index
                 cols[i].markdown(
                     f"""<div style="border:1px solid #ddd; padding:5px; border-radius:5px; background-color:{bg_color}; min-height:100px;">
                     <span style="font-weight:bold; font-size:1.2em;">{day}</span><br>
                     <small>ADR: <b>${adr:.0f}</b></small><br>
                     <small>RPAR: <b>${revp:.0f}</b></small><br>
                     <small>OCC: <b>{occ:.0f}%</b></small>
-                    </div>""", unsafe_allow_index=True, unsafe_allow_html=True
+                    </div>""", unsafe_allow_html=True
                 )
             else:
-                # Placeholder for future dates
+                # Placeholder for future dates (Targets)
                 cols[i].markdown(
                     f"""<div style="border:1px solid #eee; padding:5px; border-radius:5px; color:#999; min-height:100px;">
                     <span style="font-weight:bold;">{day}</span><br>
