@@ -2,3 +2,6 @@ streamlit
 pandas
 plotly
 numpy
+streamlit-option-menu
+scikit-learn
+statsmodels
